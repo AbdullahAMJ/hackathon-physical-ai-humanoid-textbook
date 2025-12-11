@@ -2,34 +2,63 @@
 title: The Robotic Nervous System (ROS 2)
 sidebar_label: Module 1 - ROS 2
 ---
-# Module 1: The Robotic Nervous System (ROS 2)
+# Module 1: The Robotic Nervous System
+> "In Physical AI, ROS 2 is the nervous system connecting the brain (VLA) to the muscles (Actuators)."
 
-> "If the AI is the brain, ROS 2 is the nervous system."
-
-## 1.1 The Philosophy of Middleware
-Robotics is a "System of Systems." You have a LiDAR sensor updating at 20Hz, a camera at 30Hz, and a motor controller at 1kHz. If you wrote this as a single Python script (`while True:`), the camera lag would cause the motors to stutter.
-
-**ROS 2 (Robot Operating System)** solves this by decoupling processes. It uses **DDS (Data Distribution Service)** to handle the networking layer, allowing "Nodes" to communicate without knowing about each other.
+## 1.1 Architecture: The DDS Layer
+Unlike ROS 1, ROS 2 uses **DDS (Data Distribution Service)** for real-time communication. This eliminates the "Master Node" bottleneck (the `roscore` single point of failure).
+- **Discovery:** Nodes automatically discover each other on the network via multicasting.
+- **QoS (Quality of Service):** We configure sensors to `Best Effort` (low latency, okay to drop packets) and control commands to `Reliable` (guaranteed delivery, with retries).
+- **Serialization:** Data is serialized into binary format for efficient transport over UDP/TCP.
 
 ## 1.2 Core Concepts
 
 ### Nodes (The Workers)
-A **Node** is a single process that performs a specific computation.
-- **Best Practice:** Write nodes in Python using `rclpy` for logic, and C++ for heavy perception.
-- **Lifecycle:** Nodes have states (Unconfigured, Inactive, Active) to ensure the robot doesn't start moving before the brakes are released.
+A **Node** is a single executable process that performs a specific task (e.g., `camera_driver`, `path_planner`).
+```python
+import rclpy
+from rclpy.node import Node
+from sensor_msgs.msg import LaserScan
+
+class SensorNode(Node):
+    def __init__(self):
+        super().__init__('lidar_driver')
+        # Create a publisher on topic 'scan' with a queue size of 10
+        self.pub = self.create_publisher(LaserScan, 'scan', 10)
+        self.timer = self.create_timer(0.1, self.timer_callback) # 10Hz
+
+    def timer_callback(self):
+        msg = LaserScan()
+        # ... populate msg data ...
+        self.pub.publish(msg)
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = SensorNode()
+    rclpy.spin(node)
+    rclpy.shutdown()
+```
 
 ### Topics (The Veins)
-Nodes communicate by passing messages over **Topics**. It uses a Publisher/Subscriber model.
-- **Camera Node:** Publishes images to `/camera/image_raw`.
-- **Vision Node:** Subscribes to `/camera/image_raw` to detect faces.
-- **QoS (Quality of Service):** You can configure topics to be "Best Effort" (drop packets if busy) or "Reliable" (guarantee delivery).
+Topics handle asynchronous data streaming.
+- **Publish/Subscribe:** A many-to-many communication model.
+- **Interface Definition:** Defined in `.msg` files (e.g., `geometry_msgs/Twist` for velocity).
 
 ### Services (The Reflexes)
-While Topics are for streaming data, **Services** are for synchronous request/response interactions.
-- Example: "Take a picture now." (Client sends Request -> Server takes photo -> Server sends Response).
+Services handle synchronous Request/Response interactions.
+- **Client/Server:** A one-to-one model. The client waits (blocks or yields) until the server responds.
+- **Use Case:** "Reset Simulation", "Calibrate IMU", "Trigger Grasp".
 
-## 1.3 URDF: The Body Schema
-To simulate a humanoid, we must describe its physical structure (links and joints) using the **Unified Robot Description Format (URDF)**.
-- **Links:** The rigid parts (arm, leg, head).
-- **Joints:** The moving parts (servo motors, hinges).
-- **Inertial:** Mass and Center of Gravity data (crucial for physics simulation).
+### Actions (The Long-Term Goals)
+For tasks that take time (e.g., "Navigate to Kitchen"), we use **Actions**.
+- **Feedback:** The server provides periodic updates (e.g., "Distance remaining: 2.5m") while working.
+- **Cancelable:** The client can abort the goal mid-execution.
+
+## 1.3 The Execution Model
+ROS 2 uses **Executors** to handle callbacks within a process.
+- **SingleThreadedExecutor:** Runs callbacks sequentially. Safe but can block.
+- **MultiThreadedExecutor:** Runs callbacks in a thread pool. requires thread-safe code.
+
+## 1.4 URDF & TF2
+- **URDF (Unified Robot Description Format):** An XML representation of the robot's kinematics (links, joints, limits).
+- **TF2 (Transform Library):** Keeps track of multiple coordinate frames (e.g., `map` -> `odom` -> `base_link` -> `camera_link`) over time. This allows us to transform a point detected by the camera into the map frame for navigation.
