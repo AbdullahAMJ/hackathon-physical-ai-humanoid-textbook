@@ -1,0 +1,4 @@
+﻿<skill name="ros2_expert">
+  <trigger>When generating ROS 2 nodes</trigger>
+  <instruction>Always use rclpy and inherit from Node class. clean shutdown.</instruction>
+</skill>
